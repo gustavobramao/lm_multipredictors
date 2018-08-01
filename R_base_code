@@ -1,0 +1,57 @@
+#Forecast Y=CPAs USING x=MULTIPLE PREDICTORS AND LINEAR REGRESSION
+library(corrplot)
+library(plotly)
+
+# import data set
+#https://docs.google.com/spreadsheets/d/1V2vfqA_jb2btqLD7K5Km-e1hKEt0g-wXytWkM_qG5KM/edit?usp=sharing
+attach(DF)
+
+#Visualize correlation between variables.
+newdatacor = cor(DF[2:6])
+corrplot(newdatacor, method = "number")
+
+#Perform aditive multiple Xs linear regression
+
+v_predictor <- c("Reach","Impressions", "`Amount spent`")
+                
+v_response <- "CPA"
+
+f <- paste(v_predictor, collapse = "+")
+f <- paste(f, "-1")
+f <- paste(v_response, f, sep = "~")
+f <- as.formula(f)
+
+fit <- lm(f, data = DF)
+summary(fit)
+
+#Predict fitted values into dataframe
+Y1 <- fit$fitted.values
+Y_value <- as.data.frame(Y1)
+write.csv(Y_value, file = "y_value_f.csv")
+
+
+#Export coefficients into data frame
+write.csv(data.frame(summary(lm_fit)$coefficients), file="coeff2.csv")
+
+
+#manually check the Betas cool to compare if fitted values match
+coeffs <- coefficients(fit)
+coeffs
+DF$Reach * coeffs[1] + DF$Impressions *coeffs[2] + DF$`Amount spent`*coeffs[3]
+
+#Plot Real vs Baseline
+Date <- DF$Day
+CPA_Real <- DF$CPA
+CPA_forecast <- fit$fitted.values
+
+data <- data.frame(Date,  CPA_Real, CPA_forecast)
+data$Date <- factor(data$Date, levels = data[["Date"]])
+
+p <- plot_ly(data, x = ~Date, y = ~CPA_Real, name = 'Real', type = 'scatter', mode = 'lines',
+             line = list(color = 'rgb(105, 12, 24)', width = 3)) %>%
+  add_trace(y = ~CPA_forecast, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
+  layout(title = "Real CPA vs Prediction CPA",
+         xaxis = list(title = "Date"),
+         yaxis = list (title = "Cost per Acquisition"))
+
+print(p)
