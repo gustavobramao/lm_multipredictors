@@ -1,19 +1,18 @@
 #Forecast Y=CPAs USING x=MULTIPLE PREDICTORS AND LINEAR REGRESSION
 library(corrplot)
 library(plotly)
+library(prophet)
 
 # import data set
 #https://docs.google.com/spreadsheets/d/1V2vfqA_jb2btqLD7K5Km-e1hKEt0g-wXytWkM_qG5KM/edit?usp=sharing
 attach(DF)
 
 #Visualize correlation between variables.
-newdatacor = cor(DF[2:6])
+newdatacor = cor(DF[2:9])
 corrplot(newdatacor, method = "number")
 
 #Perform aditive multiple Xs linear regression
-
-v_predictor <- c("Reach","Impressions", "`Amount spent`")
-                
+v_predictor <- c("Reach","Impressions", "`Amount spent`", "Clicks", "Buyers", "Frequency")
 v_response <- "CPA"
 
 f <- paste(v_predictor, collapse = "+")
@@ -24,20 +23,26 @@ f <- as.formula(f)
 fit <- lm(f, data = DF)
 summary(fit)
 
+#Plot relation y_dependent & x_independent
+plot(Reach, CPA)
+abline(lm(CPA ~ Reach))
+
+
 #Predict fitted values into dataframe
 Y1 <- fit$fitted.values
 Y_value <- as.data.frame(Y1)
-write.csv(Y_value, file = "y_value_f.csv")
+write.csv(Y_value, file = "y_value_v1.csv")
 
 
 #Export coefficients into data frame
-write.csv(data.frame(summary(lm_fit)$coefficients), file="coeff2.csv")
+write.csv(data.frame(summary(fit)$coefficients), file="coeff2.csv")
 
 
 #manually check the Betas cool to compare if fitted values match
 coeffs <- coefficients(fit)
 coeffs
-DF$Reach * coeffs[1] + DF$Impressions *coeffs[2] + DF$`Amount spent`*coeffs[3]
+DF$Reach * coeffs[1] + DF$Impressions *coeffs[2] + DF$`Amount spent`*coeffs[3] + DF$Clicks*coeffs[4]
+
 
 #Plot Real vs Baseline
 Date <- DF$Day
@@ -55,3 +60,21 @@ p <- plot_ly(data, x = ~Date, y = ~CPA_Real, name = 'Real', type = 'scatter', mo
          yaxis = list (title = "Cost per Acquisition"))
 
 print(p)
+
+#Call function with prohet to fit the model based on the historical data
+colnames(DF) <- c("ds", "reach", "frequency" , "Spend" , "y" , "Buyers", "clicks", "Impressions" ,"LTV")
+m <- prophet(DF)
+
+#Forecast future by default the model will also include historical dates
+future <- make_future_dataframe(m, periods = 60)
+tail(future)
+
+#Predict the future outcome into a new data frame
+forecast <- predict(m, future)
+tail(forecast[c('ds', 'yhat', 'yhat_lower', 'yhat_upper')])
+
+# plot prediction_forecast general
+plot(m, forecast)
+
+# Plot seasonality and trend
+prophet_plot_components(m, forecast)
