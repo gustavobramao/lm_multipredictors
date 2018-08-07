@@ -6,7 +6,7 @@ library(tidyverse)
 library(bsts)  
 
 # import data set
-#https://docs.google.com/spreadsheets/d/1V2vfqA_jb2btqLD7K5Km-e1hKEt0g-wXytWkM_qG5KM/edit?usp=sharing
+#https://docs.google.com/spreadsheets/d/19xxZOgGnswmLN2FHMUjcuHizwf7IT6KTcovP0Mx2Tfk/edit?usp=sharing
 
 attach(DF)
 
@@ -120,7 +120,7 @@ plot(pred)
 
 #Add predictors that are strongely correlate to the time series. 
 bsts_fit <- bsts(Buyers ~ ., state.specification = model_components, 
-             data = DF, niter = 1000)
+                 data = DF, niter = 1000)
 
 #predict based on times series seasonality, trends and cycles and predictors
 pred_bsts <- predict(bsts_fit, newdata = DF , horizon = 10, burn = burnin, quantiles = c(.05, .95))
