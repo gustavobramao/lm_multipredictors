@@ -6,7 +6,7 @@ library(tidyverse)
 library(bsts)  
 
 # import data set
-#https://docs.google.com/spreadsheets/d/1V2vfqA_jb2btqLD7K5Km-e1hKEt0g-wXytWkM_qG5KM/edit?usp=sharing
+#https://docs.google.com/spreadsheets/d/19xxZOgGnswmLN2FHMUjcuHizwf7IT6KTcovP0Mx2Tfk/edit?usp=sharing
 
 attach(DF)
 
@@ -84,68 +84,61 @@ prophet_plot_components(m, forecast)
 #Renamos columns for BSTS
 colnames(DF) <- c("Day", "reach", "frequency" , "Spend" , "CPA" , "Buyers", "clicks", "Impressions" ,"LTV")
 
+#Create a new variable for BSTS Model
+bsts_response <- DF$Buyers
+(model_components <- list())
+AddLocalLinearTrend #prefered trend selector assuming there is a linear regressions between time series
+plot(Buyers, ylab = "")
 
-#BSTS Model 
-#Isolate seasonality and trend
-
-ss <- AddLocalLinearTrend(list(), DF$Buyers)
-ss <- AddSeasonal(ss, DF$Buyers, nseasons = 52,  season.duration = 7)
-model1 <- bsts(DF$Buyers,
-               state.specification = ss,
-               niter = 1000)
-
-#bsts model with just the trend and seasonal components.
-plot(model1)
-plot(model1, "components")  # plot(model1, "comp") works too!
-plot(model1, "help")
-
-#predict outputs in days horizon
-
-pred1 <- predict(model1, horizon = 30)
-plot(pred1, plot.original = 172)
-
-# Fit a bsts model with regressors component and uptading priors using spike and slab
-model2 <- bsts(Buyers ~ Reach + Impressions + `Amount spent` + Clicks + CPA + Frequency,
-               state.specification = ss,
-               niter = 1000,
-               data = DF)
-
-pred2 <- predict(model2, newdata = DF, horizon = 30)
-plot(pred1, plot.original = 172)
-
-# Fit a bsts model with expected model size 5, to include more coefficients.
-model3 <- bsts(Buyers ~ Reach + Impressions + `Amount spent` + Clicks + CPA + Frequency,
-               state.specification = ss,
-               niter = 1000,
-               data = DF,
-               expected.model.size = 5)  # Passed to SpikeSlabPrior.
-
-pred3 <- predict(model3, newdata = DF, horizon = 30)
-plot(pred1, plot.original = 172)
+#Trend component
+summary(model_components <- AddLocalLinearTrend(model_components, 
+                                                y = Buyers))
+#seasonal component
+summary(model_components <- AddSeasonal(model_components, y = Buyers, 
+                                        nseasons  = 52))
+#fit the model using iterations to move parameters
+st_bsts_fit <- bsts(Buyers, model_components, niter = 2000)
 
 
-plot(model2, "comp")
-plot(model3, "comp")
+#view the contribution of each elements
+burnin <- 500 # Throw away first 500 
+tibble(
+  date = as.Date(time(Buyers)),
+  trend = colMeans(st_bsts_fit$state.contributions[-(1:burnin),"trend",]),
+  seasonality = colMeans(st_bsts_fit$state.contributions[-(1:burnin),"seasonal.52.1",])) %>%
+  gather("component", "value", trend, seasonality) %>%
+  ggplot(aes(x = date, y= value)) + 
+  geom_line() + theme_bw() + 
+  theme(legend.title = element_blank()) + ylab("") + xlab("") +
+  facet_grid(component ~ ., scales="free") + guides(colour=FALSE) +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
 
-plot(model2, "coef")
-plot(model3, "coef")
+#predict with 90% interval of confidence
+pred <- predict(st_bsts_fit, horizon = 10, burn = burnin, quantiles = c(.05, .95))
+plot(pred)
 
 
-CompareBstsModels(list("Model 1" = model1,
-                       "Model 2" = model2,
-                       "Model 3" = model3),
-                  colors = c("black", "red", "blue"))
-
+#Add predictors that are strongely correlate to the time series. 
+bsts_fit <- bsts(Buyers ~ ., state.specification = model_components, 
+                 data = DF, niter = 1000)
 
 #predict based on times series seasonality, trends and cycles and predictors
-pred_bsts <- predict(model3, newdata = DF , horizon = 30, quantiles = c(.05, .95))
+pred_bsts <- predict(bsts_fit, newdata = DF , horizon = 10, burn = burnin, quantiles = c(.05, .95))
 plot(pred_bsts)
 
-# plot baseline vs real.
+#Predict fitted values into dataframe
+burn <- SuggestBurn(0.1, bsts_fit)
+Bsts_fitted_value <- predict(bsts_fit, DF, burn = burn)
 
+#Extract mean fitted values of Bsts models into DF.
+y_bsts_mu <- Bsts_fitted_value$mean
+Y_bsts_med <- as.data.frame(y_bsts_mu)
+write.csv(Y_bsts_med, file = "y_bsts.csv")
+
+#Plot Real vs Baseline Of Bsts model
 Date <- DF$Day
 Bsts_Buyers_Real <- DF$Buyers
-Bsts_Buyers_forecast <- pred_bsts$mean
+Bsts_Buyers_forecast <- y_bsts_mu
 
 data <- data.frame(Date,  Bsts_Buyers_Real, Bsts_Buyers_forecast)
 data$Date <- factor(data$Date, levels = data[["Date"]])
