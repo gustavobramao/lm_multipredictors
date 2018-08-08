@@ -1,0 +1,226 @@
+#Forecast Y=CPAs USING x=MULTIPLE PREDICTORS AND LINEAR REGRESSION
+library(corrplot)
+library(plotly)
+library(prophet)
+library(tidyverse)
+library(bsts)  
+
+# import data set
+#https://docs.google.com/spreadsheets/d/19xxZOgGnswmLN2FHMUjcuHizwf7IT6KTcovP0Mx2Tfk/edit?usp=sharing
+
+attach(DF)
+
+#Visualize correlation between variables.
+newdatacor = cor(DF[2:9])
+corrplot(newdatacor, method = "number")
+
+#Perform aditive multiple Xs linear regression
+v_predictor <- c("Reach","Impressions", "`Amount spent`", "Clicks", "CPA", "Frequency", "Promo", "`Black Friday`")
+
+v_response <- "Buyers"
+
+f <- paste(v_predictor, collapse = "+")
+f <- paste(f, "-1")
+f <- paste(v_response, f, sep = "~")
+f <- as.formula(f)
+
+fit <- lm(f, data = DF)
+summary(fit)
+
+#Plot relation y_dependent & x_independent
+plot(CPA, Buyers)
+abline(lm(Buyers ~ CPA))
+
+
+#Predict fitted values into dataframe
+Y1 <- fit$fitted.values
+Y_value <- as.data.frame(Y1)
+write.csv(Y_value, file = "y_value_v1.csv")
+
+
+#Export coefficients into data frame
+write.csv(data.frame(summary(fit)$coefficients), file="coeff2.csv")
+
+
+#manually check the Betas cool to compare if fitted values match
+coeffs <- coefficients(fit)
+coeffs
+DF$Reach * coeffs[1] + DF$Impressions *coeffs[2] + DF$`Amount spent`*coeffs[3] + DF$Clicks*coeffs[4] + DF$CPA*coeffs[5] + 
+  DF$Frequency*coeffs[6] + DF$Promo*coeffs[7] + DF$`Black Friday`*coeffs[8]
+
+
+#Plot Real vs Baseline
+Date <- DF$Day
+Buyers_Real <- DF$Buyers
+Buyers_forecast <- fit$fitted.values
+
+data <- data.frame(Date,  Buyers_Real, Buyers_forecast)
+data$Date <- factor(data$Date, levels = data[["Date"]])
+
+p <- plot_ly(data, x = ~Date, y = ~Buyers_Real, name = 'Real', type = 'scatter', mode = 'lines',
+             line = list(color = 'rgb(105, 12, 24)', width = 3)) %>%
+  add_trace(y = ~Buyers_forecast, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
+  layout(title = "Real Buyers vs Predicted Buyers",
+         xaxis = list(title = "Date"),
+         yaxis = list (title = "Buyers Lm model"))
+
+print(p)
+
+#Mape of the lineal model
+new <- subset(data, Date >='2018-03-01')
+mean(abs((new$Buyers_Real - new$Buyers_forecast)/new$Buyers_Real))
+
+
+#Call function with prohet to fit the model based on the historical data
+colnames(DF) <- c("ds", "reach", "frequency" , "Spend" , "CPA" , "y", "clicks", "Impressions" ,"LTV", "Promo", "BF")
+m <- prophet(DF)
+
+#Forecast future by default the model will also include historical dates
+future <- make_future_dataframe(m, periods = 30)
+tail(future)
+
+#Predict the future outcome into a new data frame
+forecast <- predict(m, future)
+tail(forecast[c('ds', 'yhat', 'yhat_lower', 'yhat_upper')])
+
+#Mape of Prophet
+Date <- DF$ds
+Buyers_Real <- DF$y
+Buyers_Prophet <- subset(forecast, ds <'2018-07-01')
+Buyers_Prophet_m <- Buyers_Prophet$yhat 
+
+p_data <- data.frame(Date,  Buyers_Real , Buyers_Prophet_m)
+p_new <- subset(p_data, Date >='2018-03-01')
+mean(abs((p_new$Buyers_Real - p_new$Buyers_Prophet_m)/p_new$Buyers_Real))
+
+#Plot Real vs Baseline Prophet
+p_data <- data.frame(Date,  Buyers_Real, Buyers_Prophet_m)
+data$Date <- factor(data$Date, levels = data[["Date"]])
+
+p <- plot_ly(data, x = ~Date, y = ~Buyers_Real, name = 'Real', type = 'scatter', mode = 'lines',
+             line = list(color = 'rgb(0,250,154)', width = 3)) %>%
+  add_trace(y = ~Buyers_Prophet_m, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
+  layout(title = "Real Buyers vs Predicted Buyers",
+         xaxis = list(title = "Date"),
+         yaxis = list (title = "Prophet model"))
+
+print(p)
+
+# plot prediction_forecast, seasonality, trend and cycle with prohet
+plot(m, forecast)
+prophet_plot_components(m, forecast)
+
+
+# Add Regressors to prophet
+#https://docs.google.com/spreadsheets/d/19MHLCTn4ICEoy23osQeJMJCMURvwdUb4snhwJ8-EqGE/edit?usp=sharing
+
+DF$New_Spend <- DF$Spend
+
+m <- prophet()
+m <- add_regressor(m, 'Spend')
+m <- fit.prophet(m, DF)
+
+filter <- subset(Media_p, Day > "2018-07-01")
+future$Spend <- Media_p$`Amount spent`
+
+forecast <- predict(m, future)
+prophet_plot_components(m, forecast)
+
+#Renamos columns for BSTS
+colnames(DF) <- c("Day", "reach", "frequency" , "Spend" , "CPA" , "Buyers", "clicks", "Impressions" ,"LTV", "Promo", "BF")
+
+
+#Create a new variable for BSTS Model
+bsts_response <- DF$Buyers
+(model_components <- list())
+AddLocalLinearTrend #prefered trend selector assuming there is a linear regressions between time series
+plot(Buyers, ylab = "")
+
+#Trend component
+summary(model_components <- AddLocalLinearTrend(model_components, 
+                                                y = Buyers))
+#seasonal component
+summary(model_components <- AddSeasonal(model_components, y = Buyers, 
+                                        nseasons  = 52, season.duration = 7))
+
+#Construct bsts model that only takes into account seasonality and trend
+st_bsts_fit <- bsts(Buyers, model_components, niter = 1000)
+
+
+#predict with 95% interval of confidence only using seasonality and trend
+pred <- predict(st_bsts_fit, horizon = 30, quantiles = c(.05, .95))
+plot(pred)
+
+#Extract bsts prediction of seasonality, tend and cycle into Dataframe.
+mu_bsts <- pred$mean
+Aug_bsts <- as.data.frame(mu_bsts)
+prophet_n <- subset(forecast, ds > "2018-07-01")
+prophet_buyer <- prophet_n$yhat
+prophet_date <- prophet_n$ds
+bsts_vs_prophet <- data.frame(prophet_date, Aug_bsts, prophet_buyer)
+
+
+write.csv(bsts_vs_prophet, file ="bsts_prophet.csv")
+
+
+#Construct BSTS model using seasonality & trend and Xi regressors
+bsts_fit <- bsts(Buyers ~ ., state.specification = model_components, 
+                 data = DF, niter = 1000)
+
+plot(bsts_fit)
+plot(bsts_fit, "predictors")
+plot(bsts_fit, "coef")
+
+colMeans(bsts_fit$coefficients)
+
+
+#Construct BSTS model using seasonality & trend and Xi regressors forcing inclusion
+bsts_fit1 <- bsts(Buyers ~ ., state.specification = model_components, 
+                  data = DF, niter = 1000, expected.model.size = 10) #passed to spike and slab
+
+plot(bsts_fit1)
+plot(bsts_fit1, "predictors")
+plot(bsts_fit1, "coef")
+
+colMeans(bsts_fit1$coefficients)
+
+#view coeffs
+summary(bsts_fit)
+
+#compare the BSTS models
+CompareBstsModels(list("ST" = st_bsts_fit,
+                       "ST + reg" = bsts_fit,
+                       "ST + forced reg" = bsts_fit1),
+                  colors = c("black", "red", "blue"))
+
+
+#predict based on times series seasonality, trends, cycles, Xi predictors and best model.
+pred_bsts <- predict(bsts_fit, newdata = DF , horizon = 120, quantiles = c(.05, .95))
+plot(pred_bsts)
+
+
+#Mape of Bsts
+Date <- DF$Day
+Buyers_Real <- DF$Buyers
+Buyers_Bsts <- pred_bsts$mean
+
+bs_data <- data.frame(Date,  Buyers_Real , Buyers_Bsts)
+bs_new <- subset(bs_data, Date >='2018-03-01')
+mean(abs((bs_new$Buyers_Real - bs_new$Buyers_Bsts)/bs_new$Buyers_Real))
+
+#Plot Real vs Baseline Of Bsts model
+Date <- DF$Day
+Bsts_Buyers_Real <- DF$Buyers
+Bsts_Buyers_forecast <- Buyers_Bsts
+
+data <- data.frame(Date,  Bsts_Buyers_Real, Bsts_Buyers_forecast)
+data$Date <- factor(data$Date, levels = data[["Date"]])
+
+p <- plot_ly(data, x = ~Date, y = ~Bsts_Buyers_Real, name = 'Real', type = 'scatter', mode = 'lines',
+             line = list(color = 'rgb(207,181,59)', width = 3)) %>%
+  add_trace(y = ~Bsts_Buyers_forecast, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
+  layout(title = "Bsts Model Real Buyers vs Predicted Buyers",
+         xaxis = list(title = "Date"),
+         yaxis = list (title = "Buyers Lm model"))
+
+print(p)
