@@ -94,12 +94,12 @@ p_new <- subset(p_data, Date >='2018-03-01')
 mean(abs((p_new$Buyers_Real - p_new$Buyers_Prophet_m)/p_new$Buyers_Real))
 
 #Plot Real vs Baseline Prophet
-p_data <- data.frame(Date,  Buyers_Real, Buyers_Prohet_m)
+p_data <- data.frame(Date,  Buyers_Real, Buyers_Prophet_m)
 data$Date <- factor(data$Date, levels = data[["Date"]])
 
 p <- plot_ly(data, x = ~Date, y = ~Buyers_Real, name = 'Real', type = 'scatter', mode = 'lines',
              line = list(color = 'rgb(0,250,154)', width = 3)) %>%
-  add_trace(y = ~Buyers_Prohet_m, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
+  add_trace(y = ~Buyers_Prophet_m, name = 'Forecast', line = list(color = 'rgb(22, 96, 167)', width = 3)) %>%
   layout(title = "Real Buyers vs Predicted Buyers",
          xaxis = list(title = "Date"),
          yaxis = list (title = "Prophet model"))
@@ -160,7 +160,7 @@ plot(pred_bs)
 
 #Add predictors that are strongely correlate to the time series. 
 bsts_fit1 <- bsts(Buyers ~ ., state.specification = model_components, 
-                 data = DF, niter = 1000, expected.model.size = 10)
+                  data = DF, niter = 1000, expected.model.size = 10)
 
 plot(bsts_fit)
 plot(bsts_fit, "predictors")
